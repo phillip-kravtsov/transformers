@@ -18,6 +18,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """ PyTorch Persimmon model."""
+#from pytorch_memlab import profile_every
 import math
 from typing import List, Optional, Tuple, Union
 
@@ -593,6 +594,7 @@ class PersimmonModel(PersimmonPreTrainedModel):
         return combined_attention_mask
 
     @add_start_docstrings_to_model_forward(PERSIMMON_INPUTS_DOCSTRING)
+    #@profile_every(1) 
     def forward(
         self,
         input_ids: torch.LongTensor = None,

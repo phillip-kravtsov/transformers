@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """ PyTorch Fuyu model."""
+#from pytorch_memlab import profile_every
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -168,6 +169,9 @@ class FuyuForCausalLM(FuyuPreTrainedModel):
     def get_input_embeddings(self):
         return self.language_model.get_input_embeddings()
 
+    def get_output_embeddings(self):
+        return self.language_model.get_output_embeddings()
+
     def set_input_embeddings(self, value):
         self.language_model.set_input_embeddings(value)
 
@@ -208,10 +212,12 @@ class FuyuForCausalLM(FuyuPreTrainedModel):
                     f"Number of continuous embeddings {continuous_embeddings[batch_idx].shape=} does not match "
                     f"number of continuous token ids {src_indices.shape=} in batch element {batch_idx}."
                 )
+            #print('cont embeddings dtype', continuous_embeddings.dtype)
             output_embeddings[batch_idx, dst_indices] = continuous_embeddings[batch_idx][src_indices]
         return output_embeddings
 
     @add_start_docstrings_to_model_forward(FUYU_INPUTS_DOCSTRING)
+    #@profile_every(1)
     def forward(
         self,
         input_ids: torch.LongTensor = None,
@@ -225,6 +231,7 @@ class FuyuForCausalLM(FuyuPreTrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
+        labels: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -261,7 +268,12 @@ class FuyuForCausalLM(FuyuPreTrainedModel):
         if inputs_embeds is None:
             inputs_embeds = self.language_model.get_input_embeddings()(input_ids)
             if image_patches is not None and past_key_values is None:
-                patch_embeddings = self.vision_embed_tokens(image_patches.to(self.vision_embed_tokens.weight.dtype))
+                #print('image_patches.dtype', image_patches.dtype)
+                #print('vet.weight.dtype', self.vision_embed_tokens.weight.dtype)
+                ipt = image_patches.to(self.vision_embed_tokens.weight.dtype)
+                #print('ipt.dtype', ipt.dtype)
+                patch_embeddings = self.vision_embed_tokens(ipt).to(inputs_embeds.dtype)
+                #print('patch_embeddings.dtype', patch_embeddings.dtype)
                 inputs_embeds = self.gather_continuous_embeddings(
                     word_embeddings=inputs_embeds,
                     continuous_embeddings=patch_embeddings,
@@ -274,6 +286,7 @@ class FuyuForCausalLM(FuyuPreTrainedModel):
             position_ids=position_ids,
             past_key_values=past_key_values,
             output_attentions=output_attentions,
+            labels=labels,
             use_cache=use_cache,
         )
         if not return_dict:

@@ -12,10 +12,7 @@ from ...image_utils import (
 )
 from ...processing_utils import ProcessorMixin
 from ...utils import is_torch_available, is_vision_available, logging
-
-
-if is_torch_available() and is_vision_available():
-    from .image_processing_fuyu import FuyuImageProcessor
+from .image_processing_fuyu import FuyuImageProcessor
 
 
 logger = logging.get_logger(__name__)
@@ -25,6 +22,7 @@ if is_vision_available():
 
 if is_torch_available():
     import torch
+    from torch.nn.utils.rnn import pad_sequence
 
 BBOX_OPEN_STRING = "<0x00>"  # <bbox>
 BBOX_CLOSE_STRING = "<0x01>"  # </bbox>
@@ -540,11 +538,15 @@ class FuyuProcessor(ProcessorMixin):
                 offset=0,
             )
 
-            image_patches_tensor = torch.stack([img[0] for img in model_image_input["image_patches"]]).unsqueeze(1)
+            image_patches_tensor = pad_sequence([img[0] for img in model_image_input["image_patches"]], batch_first=True)
+            image_padded_packed_tokens_tensor = pad_sequence(image_padded_unpacked_tokens, batch_first=True, padding_value=self.tokenizer.bos_token_id)
+            attention_mask = pad_sequence(
+                [torch.ones_like(t) for t in image_padded_unpacked_tokens], batch_first=True, padding_value=0)
             return {
-                "input_ids": image_padded_unpacked_tokens[0].unsqueeze(0),
-                "image_patches": image_patches_tensor[0][0].unsqueeze(0),
+                "input_ids": image_padded_packed_tokens_tensor,
+                "image_patches": image_patches_tensor,
                 "image_patches_indices": image_patch_input_indices,
+                "attention_mask": attention_mask,
             }
 
     def batch_decode(self, *args, **kwargs):
