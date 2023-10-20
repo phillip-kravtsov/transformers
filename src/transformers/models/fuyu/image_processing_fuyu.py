@@ -51,13 +51,14 @@ class FuyuImageProcessor(BaseImageProcessor):
     ]
 
     def __init__(
-        self, target_height=1080, target_width=1920, padding_value=1.0, padding_mode: str = "constant", **kwargs
+        self, target_height=1080, target_width=1920, padding_value=1.0, padding_mode: str = "constant", debug=False,**kwargs
     ):
         super().__init__(**kwargs)
         self.target_width = target_width
         self.target_height = target_height
         self.padding_value = padding_value
         self.padding_mode = padding_mode
+        self.debug = debug
 
     def get_num_patches(self, img_h: int, img_w: int, patch_dim_h: int, patch_dim_w: int) -> int:
         """Calculate number of patches required to encode an image."""
@@ -225,8 +226,14 @@ class FuyuImageProcessor(BaseImageProcessor):
 
         new_height = int(image_height * optimal_scale_factor)
         new_width = int(image_width * optimal_scale_factor)
-
         scaled_image = resize(image=image, size=(new_width, new_height))
+        if self.debug:
+            print('scale: target_height, image_height', self.target_height, image_height)
+            print('scale: target_width , image_width', self.target_width, image_width)
+            print('scale: factor height, factor width', height_scale_factor, width_scale_factor)
+            print('scale factor:', optimal_scale_factor)
+            print('new height', new_height, new_width)
+            print('scaled image shape', scaled_image.shape)
         return np.array(scaled_image)
 
     def _pad_to_target_size(self, image: np.ndarray) -> np.ndarray:
@@ -236,7 +243,8 @@ class FuyuImageProcessor(BaseImageProcessor):
         padding_left = 0
         padding_bottom = self.target_height - image_height
         padding_right = self.target_width - image_width
-
+        if self.debug:
+            print('padding', (padding_top, padding_bottom), (padding_left, padding_right))
         padded_image = pad(
             image,
             ((padding_top, padding_bottom), (padding_left, padding_right)),
