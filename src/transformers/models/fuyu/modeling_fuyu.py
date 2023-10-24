@@ -156,7 +156,20 @@ class FuyuForCausalLM(FuyuPreTrainedModel):
         super().__init__(config)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
-        self.language_model = AutoModelForCausalLM.from_config(config.text_config)
+        language_model_config = config.text_config
+        language_model_config.update(dict(
+            hidden_size=config.hidden_size,
+            intermediate_size=config.intermediate_size,
+            num_attention_heads=config.num_attention_heads,
+            hidden_act=config.hidden_act,
+            attention_dropout=config.attention_dropout,
+            hidden_dropout=config.hidden_dropout,
+            partial_rotary_factor=config.partial_rotary_factor,
+            qk_layernorm=config.qk_layernorm,
+            rope_scaling=config.rope_scaling,
+            rope_theta=config.rope_theta,
+        ))
+        self.language_model = AutoModelForCausalLM.from_config(language_model_config)
 
         self.vision_embed_tokens = nn.Linear(
             config.patch_size * config.patch_size * config.num_channels, config.hidden_size
