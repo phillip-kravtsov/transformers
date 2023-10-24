@@ -657,6 +657,7 @@ def is_tokenizers_available():
 
 
 def is_vision_available():
+    return True
     _pil_available = importlib.util.find_spec("PIL") is not None
     if _pil_available:
         try:

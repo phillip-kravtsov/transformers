@@ -390,7 +390,7 @@ class FuyuProcessor(ProcessorMixin):
         image_unpadded_widths = []
 
         for image in images:
-            image = to_numpy_array(image)
+            image = to_numpy_array(image).astype(np.float32)
             if not is_scaled_image(image):
                 image = image / 255.0
             channel_dimension = infer_channel_dimension_format(image, 3)
@@ -492,7 +492,7 @@ class FuyuProcessor(ProcessorMixin):
 
             image_placeholder_id = self.tokenizer("|SPEAKER|", add_special_tokens=False)["input_ids"][1]
             image_newline_id = self.tokenizer("|NEWLINE|", add_special_tokens=False)["input_ids"][1]
-            tensor_batch_images = torch.stack([img[0] for img in batch_images]).unsqueeze(1)
+            tensor_batch_images = torch.stack([img[0] for img in batch_images]).unsqueeze(1).to(torch.float32)
             model_image_input = self.image_processor.process_images_for_model_input(
                 image_input=tensor_batch_images,
                 image_present=image_present,
@@ -537,15 +537,18 @@ class FuyuProcessor(ProcessorMixin):
                 offset=0,
             )
 
-            image_patches_tensor = pad_sequence([img[0] for img in model_image_input["image_patches"]], batch_first=True)
-            image_padded_packed_tokens_tensor = pad_sequence(image_padded_unpacked_tokens, batch_first=True, padding_value=self.tokenizer.bos_token_id)
-            attention_mask = pad_sequence(
-                [torch.ones_like(t) for t in image_padded_unpacked_tokens], batch_first=True, padding_value=0)
+            image_patches_tensor = pad_sequence(
+                [img[0] for img in model_image_input["image_patches"]],
+                batch_first=True)
+
+            image_padded_packed_tokens_tensor = pad_sequence(image_padded_unpacked_tokens,
+                batch_first=True,
+                padding_value=self.tokenizer.bos_token_id
+            )
             return {
                 "input_ids": image_padded_packed_tokens_tensor,
                 "image_patches": image_patches_tensor,
                 "image_patches_indices": image_patch_input_indices,
-                "attention_mask": attention_mask,
             }
 
     def batch_decode(self, *args, **kwargs):

@@ -72,7 +72,7 @@ def is_pil_image(img):
 
 def is_valid_image(img):
     return (
-        (is_vision_available() and isinstance(img, PIL.Image.Image))
+        (True and isinstance(img, PIL.Image.Image))
         or isinstance(img, np.ndarray)
         or is_torch_tensor(img)
         or is_tf_tensor(img)

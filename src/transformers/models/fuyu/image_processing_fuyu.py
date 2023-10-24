@@ -252,5 +252,9 @@ class FuyuImageProcessor(BaseImageProcessor):
             image = to_numpy_array(image)
         scaled_image = self._scale_to_target_aspect_ratio(image)
         padded_image = self._pad_to_target_size(scaled_image)
+        if isinstance(padded_image, np.ndarray) and padded_image.dtype != np.float32:
+            padded_image = padded_image.astype(np.float32)
+        if isinstance(padded_image, torch.Tensor) and padded_image.dtype != torch.float32:
+            padded_image = padded_image.to(torch.float32)
         normalized_padded_image = normalize(padded_image, 0.5, 0.5)
         return normalized_padded_image
