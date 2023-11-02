@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """ PyTorch Fuyu model."""
-#from pytorch_memlab import profile_every
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -139,6 +138,8 @@ FUYU_INPUTS_DOCSTRING = r"""
             Whether or not to return a [`~utils.ModelOutput`] instead of a plain tuple.
 """
 
+class FuyuVisionEmbedTokens(nn.Linear):
+    pass
 
 @add_start_docstrings(
     "The bare Fuyu Model outputting raw hidden-states without any specific head on top.",
@@ -168,10 +169,11 @@ class FuyuForCausalLM(FuyuPreTrainedModel):
             qk_layernorm=config.qk_layernorm,
             rope_scaling=config.rope_scaling,
             rope_theta=config.rope_theta,
+            use_cache=config.use_cache,
         ))
         self.language_model = AutoModelForCausalLM.from_config(language_model_config)
 
-        self.vision_embed_tokens = nn.Linear(
+        self.vision_embed_tokens = FuyuVisionEmbedTokens(
             config.patch_size * config.patch_size * config.num_channels, config.hidden_size
         )
 
@@ -230,7 +232,6 @@ class FuyuForCausalLM(FuyuPreTrainedModel):
         return output_embeddings
 
     @add_start_docstrings_to_model_forward(FUYU_INPUTS_DOCSTRING)
-    #@profile_every(1)
     def forward(
         self,
         input_ids: torch.LongTensor = None,

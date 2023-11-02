@@ -26,6 +26,7 @@ import torch
 import torch.utils.checkpoint
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
+import torch.nn.functional as F
 
 from ...activations import ACT2FN
 from ...modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast, SequenceClassifierOutputWithPast
@@ -35,12 +36,23 @@ from .configuration_persimmon import PersimmonConfig
 
 if is_flash_attn_2_available():
     from flash_attn import flash_attn_func, flash_attn_varlen_func
+    from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input  # noqa
 
 
 logger = logging.get_logger(__name__)
 
 _CONFIG_FOR_DOC = "PersimmonConfig"
 
+def _get_unpad_data(padding_mask):
+    seqlens_in_batch = padding_mask.sum(dim=-1, dtype=torch.int32)
+    indices = torch.nonzero(padding_mask.flatten(), as_tuple=False).flatten()
+    max_seqlen_in_batch = seqlens_in_batch.max().item()
+    cu_seqlens = F.pad(torch.cumsum(seqlens_in_batch, dim=0, dtype=torch.torch.int32), (1, 0))
+    return (
+        indices,
+        cu_seqlens,
+        max_seqlen_in_batch,
+    )
 
 # Copied from transformers.models.bart.modeling_bart._make_causal_mask
 def _make_causal_mask(
@@ -275,6 +287,7 @@ class PersimmonAttention(nn.Module):
         past_key_value: Optional[Tuple[torch.Tensor]] = None,
         output_attentions: bool = False,
         use_cache: bool = False,
+        padding_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         bsz, q_len, _ = hidden_states.size()
 
@@ -325,11 +338,38 @@ class PersimmonAttention(nn.Module):
             query_states = query_states.transpose(1, 2)
             key_states = key_states.transpose(1, 2)
             value_states = value_states.transpose(1, 2)
-            attn_output = flash_attn_func(
-                query_states, key_states, value_states, 0.0, softmax_scale=None,#math.sqrt(self.head_dim),
-                causal=True
-            )
+            #print(query_states.shape)
+            if padding_mask is not None:
+                #print('entering padding mask is not none')
+                batch_size = query_states.shape[0]
+                query_states, key_states, value_states, indices_q, cu_seq_lens, max_seq_lens = self._upad_input(
+                    query_states, key_states, value_states, padding_mask, q_len
+                )
+
+                cu_seqlens_q, cu_seqlens_k = cu_seq_lens
+                max_seqlen_in_batch_q, max_seqlen_in_batch_k = max_seq_lens
+
+                attn_output_unpad = flash_attn_varlen_func(
+                    query_states,
+                    key_states,
+                    value_states,
+                    cu_seqlens_q=cu_seqlens_q,
+                    cu_seqlens_k=cu_seqlens_k,
+                    max_seqlen_q=max_seqlen_in_batch_q,
+                    max_seqlen_k=max_seqlen_in_batch_k,
+                    dropout_p=0.0,
+                    softmax_scale=None,
+                    causal=True,
+                )
+
+                attn_output = pad_input(attn_output_unpad, indices_q, batch_size, q_len)
+            else:
+                #print('padding mask is none.')
+                attn_output = flash_attn_func(
+                    query_states, key_states, value_states, 0.0, softmax_scale=None, causal=True
+                )
         else:
+            print('doing normal attn')
             attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
 
             if attn_weights.size() != (bsz, self.num_heads, q_len, kv_seq_len):
@@ -369,6 +409,44 @@ class PersimmonAttention(nn.Module):
 
         return attn_output, attn_weights, past_key_value
 
+    def _upad_input(self, query_layer, key_layer, value_layer, padding_mask, query_length):
+        indices_k, cu_seqlens_k, max_seqlen_in_batch_k = _get_unpad_data(padding_mask)
+        batch_size, kv_seq_len, num_key_value_heads, head_dim = key_layer.shape
+
+        key_layer = index_first_axis(
+            key_layer.reshape(batch_size * kv_seq_len, num_key_value_heads, head_dim), indices_k
+        )
+        value_layer = index_first_axis(
+            value_layer.reshape(batch_size * kv_seq_len, num_key_value_heads, head_dim), indices_k
+        )
+        if query_length == kv_seq_len:
+            query_layer = index_first_axis(
+                query_layer.reshape(batch_size * kv_seq_len, self.num_heads, head_dim), indices_k
+            )
+            cu_seqlens_q = cu_seqlens_k
+            max_seqlen_in_batch_q = max_seqlen_in_batch_k
+            indices_q = indices_k
+        elif query_length == 1:
+            max_seqlen_in_batch_q = 1
+            cu_seqlens_q = torch.arange(
+                batch_size + 1, dtype=torch.int32, device=query_layer.device
+            )  # There is a memcpy here, that is very bad.
+            indices_q = cu_seqlens_q[:-1]
+            query_layer = query_layer.squeeze(1)
+        else:
+            # The -q_len: slice assumes left padding.
+            padding_mask = padding_mask[:, -query_length:]
+            query_layer, indices_q, cu_seqlens_q, max_seqlen_in_batch_q = unpad_input(query_layer, padding_mask)
+
+        return (
+            query_layer,
+            key_layer,
+            value_layer,
+            indices_q,
+            (cu_seqlens_q, cu_seqlens_k),
+            (max_seqlen_in_batch_q, max_seqlen_in_batch_k),
+        )
+
 
 class PersimmonDecoderLayer(nn.Module):
     def __init__(self, config: PersimmonConfig):
@@ -388,6 +466,7 @@ class PersimmonDecoderLayer(nn.Module):
         past_key_value: Optional[Tuple[torch.Tensor]] = None,
         output_attentions: Optional[bool] = False,
         use_cache: Optional[bool] = False,
+        padding_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         """
         Args:
@@ -421,6 +500,7 @@ class PersimmonDecoderLayer(nn.Module):
             past_key_value=past_key_value,
             output_attentions=output_attentions,
             use_cache=use_cache,
+            padding_mask=padding_mask,
         )
         hidden_states = residual + hidden_states
 
@@ -550,6 +630,8 @@ PERSIMMON_INPUTS_DOCSTRING = r"""
             Whether or not to return a [`~utils.ModelOutput`] instead of a plain tuple.
 """
 
+class PersimmonEmbedTokens(nn.Embedding):
+    pass
 
 @add_start_docstrings(
     "The bare Persimmon Model outputting raw hidden-states without any specific head on top.",
@@ -569,7 +651,7 @@ class PersimmonModel(PersimmonPreTrainedModel):
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
-        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
+        self.embed_tokens = PersimmonEmbedTokens(config.vocab_size, config.hidden_size, self.padding_idx)
         self.layers = nn.ModuleList([PersimmonDecoderLayer(config) for _ in range(config.num_hidden_layers)])
         self.final_layernorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
 
@@ -608,7 +690,6 @@ class PersimmonModel(PersimmonPreTrainedModel):
         return combined_attention_mask
 
     @add_start_docstrings_to_model_forward(PERSIMMON_INPUTS_DOCSTRING)
-    #@profile_every(1) 
     def forward(
         self,
         input_ids: torch.LongTensor = None,
@@ -657,9 +738,17 @@ class PersimmonModel(PersimmonPreTrainedModel):
             inputs_embeds = self.embed_tokens(input_ids)
         # embed positions
         if attention_mask is None:
+            #print('attention mask is none')
             attention_mask = torch.ones(
                 (batch_size, seq_length_with_past), dtype=torch.bool, device=inputs_embeds.device
             )
+            padding_mask = None
+        else:
+            if 0 in attention_mask:
+                padding_mask = attention_mask
+                #print('setting padding mask.')
+            else:
+                padding_mask = None
         attention_mask = self._prepare_decoder_attention_mask(
             attention_mask, (batch_size, seq_length), inputs_embeds, past_key_values_length
         )
@@ -689,7 +778,7 @@ class PersimmonModel(PersimmonPreTrainedModel):
                 def create_custom_forward(module):
                     def custom_forward(*inputs):
                         # None for past_key_value
-                        return module(*inputs, past_key_value, output_attentions)
+                        return module(*inputs, past_key_value, output_attentions, padding_mask=padding_mask)
 
                     return custom_forward
 
@@ -698,6 +787,7 @@ class PersimmonModel(PersimmonPreTrainedModel):
                     hidden_states,
                     attention_mask,
                     position_ids,
+                    use_reentrant=True,
                 )
             else:
                 layer_outputs = decoder_layer(
@@ -707,6 +797,7 @@ class PersimmonModel(PersimmonPreTrainedModel):
                     past_key_value=past_key_value,
                     output_attentions=output_attentions,
                     use_cache=use_cache,
+                    padding_mask=padding_mask,
                 )
 
             hidden_states = layer_outputs[0]
@@ -734,6 +825,8 @@ class PersimmonModel(PersimmonPreTrainedModel):
         )
 
 
+class PersimmonOutputEmbedding(nn.Linear):
+    pass
 class PersimmonForCausalLM(PersimmonPreTrainedModel):
     _tied_weights_keys = ["lm_head.weight"]
 
@@ -742,7 +835,7 @@ class PersimmonForCausalLM(PersimmonPreTrainedModel):
         super().__init__(config)
         self.model = PersimmonModel(config)
         self.vocab_size = config.vocab_size
-        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        self.lm_head = PersimmonOutputEmbedding(config.hidden_size, config.vocab_size, bias=False)
 
         # Initialize weights and apply final processing
         self.post_init()
