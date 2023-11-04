@@ -237,8 +237,6 @@ class FuyuImageProcessor(BaseImageProcessor):
         padding_left = 0
         padding_bottom = self.target_height - image_height
         padding_right = self.target_width - image_width
-        if self.debug:
-            print('padding', (padding_top, padding_bottom), (padding_left, padding_right))
         padded_image = pad(
             image,
             ((padding_top, padding_bottom), (padding_left, padding_right)),

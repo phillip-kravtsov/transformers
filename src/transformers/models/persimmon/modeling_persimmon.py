@@ -334,21 +334,18 @@ class PersimmonAttention(nn.Module):
 
         past_key_value = (key_states, value_states) if use_cache else None
 
-        if True:
+        if self.config.use_flash_attn:
             query_states = query_states.transpose(1, 2)
             key_states = key_states.transpose(1, 2)
             value_states = value_states.transpose(1, 2)
-            #print(query_states.shape)
-            if padding_mask is not None:
-                #print('entering padding mask is not none')
+            # skip..
+            if padding_mask is not None and False:
                 batch_size = query_states.shape[0]
                 query_states, key_states, value_states, indices_q, cu_seq_lens, max_seq_lens = self._upad_input(
                     query_states, key_states, value_states, padding_mask, q_len
                 )
-
                 cu_seqlens_q, cu_seqlens_k = cu_seq_lens
                 max_seqlen_in_batch_q, max_seqlen_in_batch_k = max_seq_lens
-
                 attn_output_unpad = flash_attn_varlen_func(
                     query_states,
                     key_states,
@@ -369,7 +366,6 @@ class PersimmonAttention(nn.Module):
                     query_states, key_states, value_states, 0.0, softmax_scale=None, causal=True
                 )
         else:
-            print('doing normal attn')
             attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
 
             if attn_weights.size() != (bsz, self.num_heads, q_len, kv_seq_len):
@@ -402,10 +398,7 @@ class PersimmonAttention(nn.Module):
 
         attn_output = self.dense(attn_output)
 
-        if not output_attentions:
-            attn_weights = None
-        else:
-            attn_weights = None
+        attn_weights = None
 
         return attn_output, attn_weights, past_key_value
 

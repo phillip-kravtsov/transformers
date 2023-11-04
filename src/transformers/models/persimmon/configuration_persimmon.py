@@ -113,6 +113,7 @@ class PersimmonConfig(PretrainedConfig):
         pad_token_id=None,
         bos_token_id=1,
         eos_token_id=2,
+        use_flash_attn=False,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -132,6 +133,7 @@ class PersimmonConfig(PretrainedConfig):
         self.attention_dropout = attention_dropout
         self.partial_rotary_factor = partial_rotary_factor
         self._rope_scaling_validation()
+        self.use_flash_attn = use_flash_attn
 
         super().__init__(
             pad_token_id=pad_token_id,

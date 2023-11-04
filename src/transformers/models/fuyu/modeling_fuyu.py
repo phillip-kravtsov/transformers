@@ -162,6 +162,7 @@ class FuyuForCausalLM(FuyuPreTrainedModel):
             hidden_size=config.hidden_size,
             intermediate_size=config.intermediate_size,
             num_attention_heads=config.num_attention_heads,
+            num_hidden_layers=config.num_hidden_layers,
             hidden_act=config.hidden_act,
             attention_dropout=config.attention_dropout,
             hidden_dropout=config.hidden_dropout,
@@ -170,6 +171,7 @@ class FuyuForCausalLM(FuyuPreTrainedModel):
             rope_scaling=config.rope_scaling,
             rope_theta=config.rope_theta,
             use_cache=config.use_cache,
+            use_flash_attn=config.use_flash_attn,
         ))
         self.language_model = AutoModelForCausalLM.from_config(language_model_config)
 

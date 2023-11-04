@@ -131,6 +131,7 @@ class FuyuConfig(PretrainedConfig):
         bos_token_id=1,
         eos_token_id=2,
         text_config=None,
+        use_flash_attn=False,
         **kwargs,
     ):
         if text_config is None:
@@ -179,6 +180,7 @@ class FuyuConfig(PretrainedConfig):
         self.hidden_dropout = hidden_dropout
         self.attention_dropout = attention_dropout
         self.partial_rotary_factor = partial_rotary_factor
+        self.use_flash_attn = use_flash_attn
         self._rope_scaling_validation()
 
         super().__init__(
