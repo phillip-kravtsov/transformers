@@ -25,6 +25,7 @@ import torch
 import torch.utils.checkpoint
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
+import torch.nn.functional as F
 
 from ...activations import ACT2FN
 from ...modeling_attn_mask_utils import _prepare_4d_causal_attention_mask
@@ -429,6 +430,7 @@ class PersimmonFlashAttention2(PersimmonAttention):
             value_states = value_states.to(target_dtype)
 
         dropout_rate = 0.0 if not self.training else self.config.attention_dropout
+
         attn_output = self._flash_attention_forward(
             query_states, key_states, value_states, attention_mask, q_len, dropout=dropout_rate
         )
@@ -463,6 +465,9 @@ class PersimmonFlashAttention2(PersimmonAttention):
             softmax_scale (`float`, *optional*):
                 The scaling of QK^T before applying softmax. Default to 1 / sqrt(head_dim)
         """
+        query_states = query_states.transpose(1, 2)
+        key_states = key_states.transpose(1, 2)
+        value_states = value_states.transpose(1, 2)
         # Contains at least one padding token in the sequence
         if attention_mask is not None:
             batch_size = query_states.shape[0]
@@ -482,14 +487,14 @@ class PersimmonFlashAttention2(PersimmonAttention):
                 max_seqlen_q=max_seqlen_in_batch_q,
                 max_seqlen_k=max_seqlen_in_batch_k,
                 dropout_p=dropout,
-                softmax_scale=softmax_scale,
-                causal=self.is_causal,
+                softmax_scale=1/math.sqrt(self.head_dim),
+                causal=True
             )
 
             attn_output = pad_input(attn_output_unpad, indices_q, batch_size, query_length)
         else:
             attn_output = flash_attn_func(
-                query_states, key_states, value_states, dropout, softmax_scale=softmax_scale, causal=self.is_causal
+                query_states, key_states, value_states, dropout, softmax_scale=softmax_scale, causal=True
             )
         return attn_output
 
@@ -503,6 +508,7 @@ class PersimmonFlashAttention2(PersimmonAttention):
         value_layer = index_first_axis(
             value_layer.reshape(batch_size * kv_seq_len, num_key_value_heads, head_dim), indices_k
         )
+
         if query_length == kv_seq_len:
             query_layer = index_first_axis(
                 query_layer.reshape(batch_size * kv_seq_len, self.num_heads, head_dim), indices_k
@@ -713,6 +719,8 @@ PERSIMMON_INPUTS_DOCSTRING = r"""
             Whether or not to return a [`~utils.ModelOutput`] instead of a plain tuple.
 """
 
+class PersimmonEmbedTokens(nn.Embedding):
+    pass
 
 @add_start_docstrings(
     "The bare Persimmon Model outputting raw hidden-states without any specific head on top.",
@@ -731,7 +739,7 @@ class PersimmonModel(PersimmonPreTrainedModel):
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
-        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
+        self.embed_tokens = PersimmonEmbedTokens(config.vocab_size, config.hidden_size, self.padding_idx)
         self.layers = nn.ModuleList([PersimmonDecoderLayer(config) for _ in range(config.num_hidden_layers)])
         self.final_layernorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
 
@@ -793,13 +801,17 @@ class PersimmonModel(PersimmonPreTrainedModel):
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
         # embed positions
-        if attention_mask is None:
-            attention_mask = torch.ones(
-                (batch_size, seq_length_with_past), dtype=torch.bool, device=inputs_embeds.device
+        if getattr(self.config, "_flash_attn_2_enabled", False):
+            # 2d mask is passed through the layers
+            attention_mask = attention_mask if (attention_mask is not None and 0 in attention_mask) else None
+        else:
+            if attention_mask is None:
+                attention_mask = torch.ones(
+                    (batch_size, seq_length_with_past), dtype=torch.bool, device=inputs_embeds.device
+                )
+            attention_mask = _prepare_4d_causal_attention_mask(
+                attention_mask, (batch_size, seq_length), inputs_embeds, past_key_values_length
             )
-        attention_mask = _prepare_4d_causal_attention_mask(
-            attention_mask, (batch_size, seq_length), inputs_embeds, past_key_values_length
-        )
 
         hidden_states = inputs_embeds
 
@@ -865,6 +877,9 @@ class PersimmonModel(PersimmonPreTrainedModel):
         )
 
 
+class PersimmonLMHead(nn.Linear):
+    pass
+
 class PersimmonForCausalLM(PersimmonPreTrainedModel):
     _tied_weights_keys = ["lm_head.weight"]
 
@@ -873,7 +888,7 @@ class PersimmonForCausalLM(PersimmonPreTrainedModel):
         super().__init__(config)
         self.model = PersimmonModel(config)
         self.vocab_size = config.vocab_size
-        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        self.lm_head = PersimmonLMHead(config.hidden_size, config.vocab_size, bias=False)
 
         # Initialize weights and apply final processing
         self.post_init()

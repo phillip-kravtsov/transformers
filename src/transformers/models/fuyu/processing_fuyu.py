@@ -323,7 +323,9 @@ class FuyuProcessor(ProcessorMixin):
     image_processor_class = "FuyuImageProcessor"
     tokenizer_class = "AutoTokenizer"
 
-    def __init__(self, image_processor, tokenizer):
+    def __init__(self, image_processor,
+                 tokenizer,
+                 add_beginning_of_answer_token=True):
         super().__init__(image_processor=image_processor, tokenizer=tokenizer)
         self.image_processor = image_processor
         self.tokenizer = tokenizer
@@ -331,6 +333,7 @@ class FuyuProcessor(ProcessorMixin):
         self.max_position_embeddings = 16384  # TODO Can't derive this from model files: where to set it?
         self.pad_token_id = 0
         self.dummy_image_index = -1
+        self.add_beginning_of_answer_token = add_beginning_of_answer_token
 
     def _left_pad_inputs_with_attention_mask(self, model_inputs: List[Dict], return_attention_mask: bool):
         max_length_input_ids = max(entry["input_ids"].shape[1] for entry in model_inputs)
@@ -409,7 +412,7 @@ class FuyuProcessor(ProcessorMixin):
             max_tokens_to_generate=self.max_tokens_to_generate,
             max_position_embeddings=self.max_position_embeddings,
             add_BOS=True,
-            add_beginning_of_answer_token=True,
+            add_beginning_of_answer_token=self.add_beginning_of_answer_token,
         )
         image_padded_unpacked_tokens = construct_full_unpacked_stream(
             num_real_text_tokens=prompts_length,

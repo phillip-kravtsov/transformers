@@ -58,6 +58,7 @@ class FuyuPreTrainedModel(PreTrainedModel):
     supports_gradient_checkpointing = True
     _no_split_modules = []
     _skip_keys_device_placement = "past_key_values"
+    _supports_flash_attn_2 = True
 
     def _init_weights(self, module):
         std = self.config.initializer_range
@@ -134,6 +135,8 @@ FUYU_INPUTS_DOCSTRING = r"""
             Whether or not to return a [`~utils.ModelOutput`] instead of a plain tuple.
 """
 
+class FuyuVisionEmbedTokens(nn.Linear):
+    pass
 
 @add_start_docstrings(
     "The bare Fuyu Model outputting raw hidden-states without any specific head on top.",
@@ -151,9 +154,12 @@ class FuyuForCausalLM(FuyuPreTrainedModel):
         super().__init__(config)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
+        if getattr(config, '_flash_attn_2_enabled', False):
+            config.text_config._flash_attn_2_enabled = True
+
         self.language_model = AutoModelForCausalLM.from_config(config.text_config)
 
-        self.vision_embed_tokens = nn.Linear(
+        self.vision_embed_tokens = FuyuVisionEmbedTokens(
             config.patch_size * config.patch_size * config.num_channels, config.hidden_size
         )
 
