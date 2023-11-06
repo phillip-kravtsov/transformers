@@ -22,7 +22,7 @@ from ..auto import CONFIG_MAPPING
 logger = logging.get_logger(__name__)
 
 FUYU_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "adept/fuyu-8b-base": "https://huggingface.co/adept/fuyu-8b-base/resolve/main/config.json",
+    "adept/fuyu-8b-base": "https://huggingface.co/adept/fuyu-8b/resolve/main/config.json",
 }
 
 

@@ -164,6 +164,9 @@ class FuyuForCausalLM(FuyuPreTrainedModel):
     def get_input_embeddings(self):
         return self.language_model.get_input_embeddings()
 
+    def get_output_embeddings(self):
+        return self.language_model.get_output_embeddings()
+
     def set_input_embeddings(self, value):
         self.language_model.set_input_embeddings(value)
 
@@ -217,6 +220,7 @@ class FuyuForCausalLM(FuyuPreTrainedModel):
         position_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[List[torch.FloatTensor]] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.LongTensor] = None,
         use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -273,6 +277,7 @@ class FuyuForCausalLM(FuyuPreTrainedModel):
             position_ids=position_ids,
             past_key_values=past_key_values,
             output_attentions=output_attentions,
+            labels=labels,
             use_cache=use_cache,
         )
         if not return_dict:
