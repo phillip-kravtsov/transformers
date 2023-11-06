@@ -134,6 +134,7 @@ class FuyuConfig(PretrainedConfig):
         **kwargs,
     ):
         if text_config is None:
+            use_flash_attention_2 = kwargs.pop("use_flash_attention_2", False)
             text_config = {
                 "vocab_size": vocab_size,
                 "max_position_embeddings": max_position_embeddings,
@@ -155,6 +156,7 @@ class FuyuConfig(PretrainedConfig):
                 "bos_token_id": bos_token_id,
                 "eos_token_id": eos_token_id,
                 "tie_word_embeddings": tie_word_embeddings,
+                "use_flash_attention_2": use_flash_attention_2,
             }
             logger.info("text_config is None. initializing the text model with default values.")
         text_model_type = text_config["model_type"] if "model_type" in text_config else "persimmon"
