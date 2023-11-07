@@ -417,7 +417,7 @@ class PersimmonFlashAttention2(PersimmonAttention):
             if hasattr(self.config, "_pre_quantization_dtype"):
                 target_dtype = self.config._pre_quantization_dtype
             else:
-                target_dtype = self.query_key_value.dtype
+                target_dtype = self.query_key_value.weight.dtype
 
             logger.warning_once(
                 f"The input hidden states seems to be silently casted in float32, this might be related to"
